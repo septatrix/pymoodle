@@ -4,7 +4,7 @@ import html
 import json
 import re
 import secrets
-from typing import Any, Container, Dict, Iterable, Mapping, Text, Tuple, Union
+from typing import Any, Container, Iterable, Mapping, Text, Tuple, TypedDict, Union
 
 from requests.adapters import BaseAdapter
 from requests.models import PreparedRequest, Response
@@ -39,22 +39,25 @@ class MoodleAdapter(BaseAdapter):
         return
 
 
+class AjaxRequest(TypedDict):
+    methodname: str
+    args: Any
+
+
 class MoodleSession(Session):
-    def __init__(self, moodle_url: str, wstoken: str) -> None:
+    def __init__(self, wwwroot: str, wstoken: str) -> None:
         super().__init__()
-        self.moodle_url = moodle_url
+        self.wwwroot = wwwroot
         self.wstoken = wstoken
 
-    def ajax(self, requests: Iterable[Dict[str, Any]]) -> Any:
-        # TODO flatten args?
+    def ajax(self, requests: Iterable[AjaxRequest]) -> Any:
         indexed_requests = [
             {"index": i, "methodname": req["methodname"], "args": req["args"]}
             for i, req in enumerate(requests)
         ]
 
-        # params={"info": ",".join(req["methodname"] for req in indexed_requests)},
         return self.post(
-            f"{self.moodle_url}/lib/ajax/service.php",
+            f"{self.wwwroot}/lib/ajax/service.php",
             data=json.dumps(indexed_requests),
         ).json()
 
@@ -64,7 +67,7 @@ class MoodleSession(Session):
 
         data.update()
         response = self.post(
-            f"{self.moodle_url}/webservice/rest/server.php",
+            f"{self.wwwroot}/webservice/rest/server.php",
             data={
                 "moodlewsrestformat": "json",
                 "wstoken": self.wstoken,
