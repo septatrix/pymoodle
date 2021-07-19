@@ -47,6 +47,7 @@ class AjaxRequest(TypedDict):
 class MoodleSession(Session):
     def __init__(self, wwwroot: str, wstoken: str) -> None:
         super().__init__()
+        self.mount("moodlemobile://", MoodleAdapter())
         self.wwwroot = wwwroot
         self.wstoken = wstoken
 
@@ -81,26 +82,22 @@ class MoodleSession(Session):
             raise MoodleException(response_data)
         return response_data
 
-    @classmethod
-    def get_token(
-        cls,
-        wwwroot: str,
+    def login(
+        self,
         username: str,
         password: str,
         service: str = "moodle_mobile_app",
-    ) -> str:
-        session = cls(wwwroot, "")
-        session.mount("moodlemobile://", MoodleAdapter())
+    ) -> None:
 
-        public_config = session.ajax(
+        public_config = self.ajax(
             [{"methodname": "tool_mobile_get_public_config", "args": {}}]
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
             raise MoodleException("Login type currently not supported")
 
-        redirect_page = session.post(
-            session.get(public_config["identityproviders"][0]["url"]).url,
+        redirect_page = self.post(
+            self.get(public_config["identityproviders"][0]["url"]).url,
             data={
                 "j_username": username,
                 "j_password": password,
@@ -119,11 +116,11 @@ class MoodleSession(Session):
         if not formdata:
             raise MoodleException("Unable to parse login form")
 
-        session.post(formdata["form_submit_url"], data=formdata.groupdict())
+        self.post(formdata["form_submit_url"], data=formdata.groupdict())
 
         passport = secrets.token_urlsafe()
 
-        token_response = session.get(
+        token_response = self.get(
             public_config["launchurl"],
             params={"service": service, "passport": passport},
         )
@@ -138,4 +135,4 @@ class MoodleSession(Session):
         if signature != expected_signature:
             raise MoodleException("Invalid signature")
 
-        return wstoken
+        self.wstoken = wstoken
