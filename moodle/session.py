@@ -4,7 +4,8 @@ import html
 import json
 import re
 import secrets
-from typing import Any, Container, Iterable, Mapping, Text, Tuple, TypedDict, Union
+import sys
+from typing import Any, Container, Iterable, Mapping, Text, Tuple, Union
 
 from requests.adapters import BaseAdapter
 from requests.models import PreparedRequest, Response
@@ -12,6 +13,11 @@ from requests.sessions import Session
 
 from moodle.constants import LoginType
 from moodle.util import flatten
+
+if sys.version_info >= (3, 8):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 
 class MoodleException(Exception):
