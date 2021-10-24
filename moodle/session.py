@@ -1,14 +1,12 @@
-import base64
-import hashlib
-import html
-import re
-import secrets
+import logging
 import sys
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 from httpx import AsyncClient, Client
 
 from moodle.constants import LoginType
+from moodle.contrib.identityproviders import IdentityProvider
+from moodle.exceptions import MoodleException, WebserviceException
 from moodle.util import flatten
 
 if sys.version_info >= (3, 8):
@@ -17,19 +15,7 @@ else:
     from typing_extensions import TypedDict
 
 
-class MoodleException(Exception):
-    pass
-
-
-class WebserviceException(MoodleException):
-    def __init__(
-        self, exception: str, errorcode: str, message: str, debuginfo: Optional[str]
-    ) -> None:
-        super().__init__(exception, errorcode, message, debuginfo)
-        self.exception = exception
-        self.errorcode = errorcode
-        self.message = message
-        self.debuginfo = debuginfo
+logger = logging.getLogger(__name__)
 
 
 class AjaxRequest(TypedDict):
@@ -76,68 +62,46 @@ class MoodleClient(Client):
             raise WebserviceException(exception, errorcode, message, debuginfo)
         return response_data
 
-    def login(
+    def get_token(
         self,
         username: str,
         password: str,
         service: str = "moodle_mobile_app",
-    ) -> None:
+    ) -> str:
 
         public_config = self.ajax(
             [{"methodname": "tool_mobile_get_public_config", "args": {}}]
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
-            raise MoodleException("Login type currently not supported")
+            tokens = self.get(
+                f"{self.wwwroot}/login/token.php",
+                params={"username": username, "password": password, "service": service},
+            )
+            wstoken = tokens.json()["token"]
+            if not isinstance(wstoken, str):
+                raise MoodleException("Invalid wstoken returned")
+            return wstoken
 
-        redirect_page = self.post(
-            self.get(  # type: ignore
-                public_config["identityproviders"][0]["url"], follow_redirects=True
-            ).url,
-            data={
-                "j_username": username,
-                "j_password": password,
-                "_eventId_proceed": "",
-            },
-        )
+        for idp_info in public_config["identityproviders"]:
+            for idp in IdentityProvider.providers:
+                if not idp.is_responsible(idp_info):
+                    continue
+                try:
+                    return idp().sync_get_token(
+                        self.wwwroot,
+                        username,
+                        password,
+                        service,
+                        idp_info,
+                        public_config,
+                    )
+                except MoodleException:
+                    logger.warning(
+                        f"Error whilst trying to authenticate with {idp}", exc_info=True
+                    )
 
-        # TODO use python html.parser
-        formdata = re.search(
-            r'<form action="(?P<form_submit_url>[^"]*)" method="post">'
-            r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
-            r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
-            html.unescape(redirect_page.text),
-            flags=re.MULTILINE | re.DOTALL,
-        )
-
-        if not formdata:
-            raise MoodleException("Unable to parse login form")
-
-        self.post(
-            formdata["form_submit_url"],
-            data=formdata.groupdict(),
-            follow_redirects=True,
-        )
-
-        passport = secrets.token_urlsafe()
-
-        token_response = self.post(
-            public_config["launchurl"],
-            params={"service": service, "passport": passport},
-            follow_redirects=False,
-        )
-
-        token = token_response.headers["Location"][len("moodlemobile://token=") :]
-        signature, wstoken, *_ = base64.b64decode(token).decode().split(":::")
-
-        expected_signature = hashlib.md5(
-            (public_config["wwwroot"] + passport).encode()
-        ).hexdigest()
-
-        if signature != expected_signature:
-            raise MoodleException("Invalid signature")
-
-        self.wstoken = wstoken
+        raise MoodleException("No identityprovider worked")
 
 
 # Alias for backwards compatibility - will be removed
@@ -185,12 +149,12 @@ class AsyncMoodleClient(AsyncClient):
 
         return response_data
 
-    async def login(
+    async def get_token(
         self,
         username: str,
         password: str,
         service: str = "moodle_mobile_app",
-    ) -> None:
+    ) -> str:
 
         public_config = (
             await self.ajax(
@@ -199,55 +163,31 @@ class AsyncMoodleClient(AsyncClient):
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
-            raise MoodleException("Login type currently not supported")
+            tokens = await self.get(
+                f"{self.wwwroot}/login/token.php",
+                params={"username": username, "password": password, "service": service},
+            )
+            wstoken = tokens.json()["token"]
+            if not isinstance(wstoken, str):
+                raise MoodleException("Invalid wstoken returned")
+            return wstoken
 
-        redirect_page = await self.post(
-            (
-                await self.get(  # type: ignore
-                    public_config["identityproviders"][0]["url"], follow_redirects=True
-                )
-            ).url,
-            data={
-                "j_username": username,
-                "j_password": password,
-                "_eventId_proceed": "",
-            },
-        )
+        for idp_info in public_config["identityproviders"]:
+            for idp in IdentityProvider.providers:
+                if not idp.is_responsible(idp_info):
+                    continue
+                try:
+                    return idp().sync_get_token(
+                        self.wwwroot,
+                        username,
+                        password,
+                        service,
+                        idp_info,
+                        public_config,
+                    )
+                except MoodleException:
+                    logger.warning(
+                        f"Error whilst trying to authenticate with {idp}", exc_info=True
+                    )
 
-        # TODO use python html.parser
-        formdata = re.search(
-            r'<form action="(?P<form_submit_url>[^"]*)" method="post">'
-            r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
-            r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
-            html.unescape(redirect_page.text),
-            flags=re.MULTILINE | re.DOTALL,
-        )
-
-        if not formdata:
-            raise MoodleException("Unable to parse login form")
-
-        await self.post(
-            formdata["form_submit_url"],
-            data=formdata.groupdict(),
-            follow_redirects=True,
-        )
-
-        passport = secrets.token_urlsafe()
-
-        token_response = await self.post(
-            public_config["launchurl"],
-            params={"service": service, "passport": passport},
-            follow_redirects=False,
-        )
-
-        token = token_response.headers["Location"][len("moodlemobile://token=") :]
-        signature, wstoken, *_ = base64.b64decode(token).decode().split(":::")
-
-        expected_signature = hashlib.md5(
-            (public_config["wwwroot"] + passport).encode()
-        ).hexdigest()
-
-        if signature != expected_signature:
-            raise MoodleException("Invalid signature")
-
-        self.wstoken = wstoken
+        raise MoodleException("No identityprovider worked")
