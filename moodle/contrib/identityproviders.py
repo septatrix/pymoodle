@@ -1,19 +1,16 @@
-import base64
-import hashlib
 import html
 import inspect
 import re
-import secrets
 import sys
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar, Dict, List, Type
+from typing import ClassVar, List, Tuple, Type
 
 if sys.version_info >= (3, 8):
     from typing import TypedDict
 else:
     from typing_extensions import TypedDict
 
-from httpx import Client
+from httpx import AsyncClient, Client
 
 from moodle.exceptions import MoodleException
 
@@ -32,105 +29,105 @@ class IdentityProvider(ABC):
         if not inspect.isabstract(cls):
             IdentityProvider.providers.append(cls)
 
+    @classmethod
+    def get_responsible_idp(
+        cls, idp_infos: List[IDPInfo]
+    ) -> Tuple[Type["IdentityProvider"], IDPInfo]:
+        for idp_info in idp_infos:
+            for idp_type in IdentityProvider.providers:
+                if idp_type.is_responsible(idp_info):
+                    return idp_type, idp_info
+        raise MoodleException("No responsible identityprovider found")
+
+    def __init__(
+        self,
+        wwwroot: str,
+        username: str,
+        password: str,
+        idp: IDPInfo,
+    ) -> None:
+        super().__init__()
+        self.wwwroot = wwwroot
+        self.username = username
+        self.password = password
+        self.idp = idp
+
     @staticmethod
     @abstractmethod
-    def is_responsible(public_config: IDPInfo) -> bool:
+    def is_responsible(idp: IDPInfo) -> bool:
         ...
 
-    @abstractmethod
-    def get_token(
-        self,
-        wwwroot: str,
-        username: str,
-        password: str,
-        service: str,
-        idp: IDPInfo,
-        public_config: Dict[str, Any],
-    ) -> str:
-        ...
+    def login(self, client: Client) -> None:
+        return None
 
-    def sync_get_token(
-        self,
-        wwwroot: str,
-        username: str,
-        password: str,
-        service: str,
-        idp: IDPInfo,
-        public_config: Dict[str, Any],
-    ) -> str:
-        return self.get_token(wwwroot, username, password, service, idp, public_config)
+    def sync_login(self, client: Client) -> None:
+        return self.login(client)
 
-    async def async_get_token(
-        self,
-        wwwroot: str,
-        username: str,
-        password: str,
-        service: str,
-        idp: IDPInfo,
-        public_config: Dict[str, Any],
-    ) -> str:
-        return self.get_token(wwwroot, username, password, service, idp, public_config)
+    async def async_login(self, client: AsyncClient) -> None:
+        with Client(cookies=client.cookies) as sync_client:
+            self.login(sync_client)
+            client.cookies.update(sync_client.cookies)
 
 
 class RWTHSingleSignOn(IdentityProvider):
+    requires_response_body = True
+
     @staticmethod
     def is_responsible(idp: IDPInfo) -> bool:
         return idp["name"] == "RWTH Single Sign On"
 
-    def get_token(
-        self,
-        wwwroot: str,
-        username: str,
-        password: str,
-        service: str,
-        idp: IDPInfo,
-        public_config: Dict[str, Any],
-    ) -> str:
+    def sync_login(self, client: Client) -> None:
+        redirect_page = client.post(
+            client.get(self.idp["url"], follow_redirects=True).url,  # type: ignore
+            data={
+                "j_username": self.username,
+                "j_password": self.password,
+                "_eventId_proceed": "",
+            },
+        )
 
-        with Client() as client:
-            redirect_page = client.post(
-                client.get(idp["url"], follow_redirects=True).url,  # type: ignore
-                data={
-                    "j_username": username,
-                    "j_password": password,
-                    "_eventId_proceed": "",
-                },
-            )
+        # TODO use python html.parser
+        formdata = re.search(
+            r'<form action="(?P<form_submit_url>[^"]*)" method="post">'
+            r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
+            r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
+            html.unescape(redirect_page.text),
+            flags=re.MULTILINE | re.DOTALL,
+        )
 
-            # TODO use python html.parser
-            formdata = re.search(
-                r'<form action="(?P<form_submit_url>[^"]*)" method="post">'
-                r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
-                r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
-                html.unescape(redirect_page.text),
-                flags=re.MULTILINE | re.DOTALL,
-            )
+        if not formdata:
+            raise MoodleException("Unable to parse login form")
 
-            if not formdata:
-                raise MoodleException("Unable to parse login form")
+        client.post(
+            formdata["form_submit_url"],
+            data=formdata.groupdict(),
+            follow_redirects=True,
+        )
 
-            client.post(
-                formdata["form_submit_url"],
-                data=formdata.groupdict(),
-                follow_redirects=True,
-            )
+    async def async_login(self, client: AsyncClient) -> None:
+        redirect_page = await client.post(
+            (await client.get(self.idp["url"], follow_redirects=True)).url,  # type: ignore
+            data={
+                "j_username": self.username,
+                "j_password": self.password,
+                "_eventId_proceed": "",
+            },
+        )
 
-            passport = secrets.token_urlsafe()
+        # TODO use python html.parser
+        formdata = re.search(
+            r'<form action="(?P<form_submit_url>[^"]*)" method="post">'
+            r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
+            r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
+            html.unescape(redirect_page.text),
+            flags=re.MULTILINE | re.DOTALL,
+        )
 
-            token_response = client.post(
-                public_config["launchurl"],
-                params={"service": service, "passport": passport},
-                follow_redirects=False,
-            )
+        if not formdata:
+            raise MoodleException("Unable to parse login form")
 
-        token = token_response.headers["Location"][len("moodlemobile://token=") :]
-        signature, wstoken, *_ = base64.b64decode(token).decode().split(":::")
-
-        expected_signature = hashlib.md5(
-            (public_config["wwwroot"] + passport).encode()
-        ).hexdigest()
-
-        if signature != expected_signature:
-            raise MoodleException("Invalid signature")
-
-        return wstoken
+        await client.post(
+            formdata["form_submit_url"],
+            data=formdata.groupdict(),
+            follow_redirects=True,
+        )

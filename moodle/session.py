@@ -1,4 +1,7 @@
+import base64
+import hashlib
 import logging
+import secrets
 import sys
 from typing import Any, Iterable
 
@@ -78,30 +81,40 @@ class MoodleClient(Client):
                 f"{self.wwwroot}/login/token.php",
                 params={"username": username, "password": password, "service": service},
             )
-            wstoken = tokens.json()["token"]
-            if not isinstance(wstoken, str):
+            token = tokens.json()["token"]
+            if not isinstance(token, str):
                 raise MoodleException("Invalid wstoken returned")
-            return wstoken
+            return token
 
-        for idp_info in public_config["identityproviders"]:
-            for idp in IdentityProvider.providers:
-                if not idp.is_responsible(idp_info):
-                    continue
-                try:
-                    return idp().sync_get_token(
-                        self.wwwroot,
-                        username,
-                        password,
-                        service,
-                        idp_info,
-                        public_config,
-                    )
-                except MoodleException:
-                    logger.warning(
-                        f"Error whilst trying to authenticate with {idp}", exc_info=True
-                    )
+        idp_type, idp_info = IdentityProvider.get_responsible_idp(
+            public_config["identityproviders"]
+        )
+        idp_type(
+            self.wwwroot,
+            username,
+            password,
+            idp_info,
+        ).sync_login(self)
 
-        raise MoodleException("No identityprovider worked")
+        passport = secrets.token_urlsafe()
+
+        token_response = self.post(
+            public_config["launchurl"],
+            params={"service": service, "passport": passport},
+            follow_redirects=False,
+        )
+
+        token = token_response.headers["Location"][len("moodlemobile://token=") :]
+        signature, wstoken, *_ = base64.b64decode(token).decode().split(":::")
+
+        expected_signature = hashlib.md5(
+            (public_config["wwwroot"] + passport).encode()
+        ).hexdigest()
+
+        if signature != expected_signature:
+            raise MoodleException("Invalid signature")
+
+        return wstoken
 
 
 # Alias for backwards compatibility - will be removed
@@ -167,27 +180,37 @@ class AsyncMoodleClient(AsyncClient):
                 f"{self.wwwroot}/login/token.php",
                 params={"username": username, "password": password, "service": service},
             )
-            wstoken = tokens.json()["token"]
-            if not isinstance(wstoken, str):
+            token = tokens.json()["token"]
+            if not isinstance(token, str):
                 raise MoodleException("Invalid wstoken returned")
-            return wstoken
+            return token
 
-        for idp_info in public_config["identityproviders"]:
-            for idp in IdentityProvider.providers:
-                if not idp.is_responsible(idp_info):
-                    continue
-                try:
-                    return idp().sync_get_token(
-                        self.wwwroot,
-                        username,
-                        password,
-                        service,
-                        idp_info,
-                        public_config,
-                    )
-                except MoodleException:
-                    logger.warning(
-                        f"Error whilst trying to authenticate with {idp}", exc_info=True
-                    )
+        idp_type, idp_info = IdentityProvider.get_responsible_idp(
+            public_config["identityproviders"]
+        )
+        await idp_type(
+            self.wwwroot,
+            username,
+            password,
+            idp_info,
+        ).async_login(self)
 
-        raise MoodleException("No identityprovider worked")
+        passport = secrets.token_urlsafe()
+
+        token_response = await self.post(
+            public_config["launchurl"],
+            params={"service": service, "passport": passport},
+            follow_redirects=False,
+        )
+
+        token = token_response.headers["Location"][len("moodlemobile://token=") :]
+        signature, wstoken, *_ = base64.b64decode(token).decode().split(":::")
+
+        expected_signature = hashlib.md5(
+            (public_config["wwwroot"] + passport).encode()
+        ).hexdigest()
+
+        if signature != expected_signature:
+            raise MoodleException("Invalid signature")
+
+        return wstoken
