@@ -1,7 +1,15 @@
-from unittest import IsolatedAsyncioTestCase, TestCase
-from unittest.case import skip
+import sys
+from unittest import TestCase
+from unittest.case import skip, skipIf
 
 from moodle.session import AsyncMoodleClient, MoodleClient
+
+if sys.version_info >= (3, 8, 0):
+    from unittest import IsolatedAsyncioTestCase
+elif sys.version_info >= (3, 7, 0):
+    from later.unittest.backport.async_case import IsolatedAsyncioTestCase
+else:
+    IsolatedAsyncioTestCase = type  # Fallback to allow subclassing
 
 
 class SyncLoginTest(TestCase):
@@ -18,6 +26,9 @@ class SyncLoginTest(TestCase):
             self.assertNotEqual(client.get_token("ab123456", "Pa55w0rd"), "")
 
 
+@skipIf(
+    sys.version_info < (3, 7, 0), "Python 3.6 does not support IsolatedAsyncioTestCase"
+)
 class AsyncLoginTest(IsolatedAsyncioTestCase):
     async def test_login(self):
         async with AsyncMoodleClient("https://school.moodledemo.net/", "") as client:
