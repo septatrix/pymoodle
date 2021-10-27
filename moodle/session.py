@@ -1,14 +1,15 @@
 import base64
 import hashlib
-import html
-import re
+import logging
 import secrets
 import sys
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 from httpx import AsyncClient, Client
 
 from moodle.constants import LoginType
+from moodle.contrib.identityproviders import IdentityProvider
+from moodle.exceptions import MoodleException, WebserviceException
 from moodle.util import flatten
 
 if sys.version_info >= (3, 8):
@@ -17,19 +18,7 @@ else:
     from typing_extensions import TypedDict
 
 
-class MoodleException(Exception):
-    pass
-
-
-class WebserviceException(MoodleException):
-    def __init__(
-        self, exception: str, errorcode: str, message: str, debuginfo: Optional[str]
-    ) -> None:
-        super().__init__(exception, errorcode, message, debuginfo)
-        self.exception = exception
-        self.errorcode = errorcode
-        self.message = message
-        self.debuginfo = debuginfo
+logger = logging.getLogger(__name__)
 
 
 class AjaxRequest(TypedDict):
@@ -76,48 +65,36 @@ class MoodleClient(Client):
             raise WebserviceException(exception, errorcode, message, debuginfo)
         return response_data
 
-    def login(
+    def get_token(
         self,
         username: str,
         password: str,
         service: str = "moodle_mobile_app",
-    ) -> None:
+    ) -> str:
 
         public_config = self.ajax(
             [{"methodname": "tool_mobile_get_public_config", "args": {}}]
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
-            raise MoodleException("Login type currently not supported")
+            tokens = self.get(
+                f"{self.wwwroot}/login/token.php",
+                params={"username": username, "password": password, "service": service},
+            )
+            token = tokens.json()["token"]
+            if not isinstance(token, str):
+                raise MoodleException("Invalid wstoken returned")
+            return token
 
-        redirect_page = self.post(
-            self.get(  # type: ignore
-                public_config["identityproviders"][0]["url"], follow_redirects=True
-            ).url,
-            data={
-                "j_username": username,
-                "j_password": password,
-                "_eventId_proceed": "",
-            },
+        idp_type, idp_info = IdentityProvider.get_responsible_idp(
+            public_config["identityproviders"]
         )
-
-        # TODO use python html.parser
-        formdata = re.search(
-            r'<form action="(?P<form_submit_url>[^"]*)" method="post">'
-            r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
-            r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
-            html.unescape(redirect_page.text),
-            flags=re.MULTILINE | re.DOTALL,
-        )
-
-        if not formdata:
-            raise MoodleException("Unable to parse login form")
-
-        self.post(
-            formdata["form_submit_url"],
-            data=formdata.groupdict(),
-            follow_redirects=True,
-        )
+        idp_type(
+            self.wwwroot,
+            username,
+            password,
+            idp_info,
+        ).sync_login(self)
 
         passport = secrets.token_urlsafe()
 
@@ -137,7 +114,7 @@ class MoodleClient(Client):
         if signature != expected_signature:
             raise MoodleException("Invalid signature")
 
-        self.wstoken = wstoken
+        return wstoken
 
 
 # Alias for backwards compatibility - will be removed
@@ -185,12 +162,12 @@ class AsyncMoodleClient(AsyncClient):
 
         return response_data
 
-    async def login(
+    async def get_token(
         self,
         username: str,
         password: str,
         service: str = "moodle_mobile_app",
-    ) -> None:
+    ) -> str:
 
         public_config = (
             await self.ajax(
@@ -199,38 +176,24 @@ class AsyncMoodleClient(AsyncClient):
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
-            raise MoodleException("Login type currently not supported")
+            tokens = await self.get(
+                f"{self.wwwroot}/login/token.php",
+                params={"username": username, "password": password, "service": service},
+            )
+            token = tokens.json()["token"]
+            if not isinstance(token, str):
+                raise MoodleException("Invalid wstoken returned")
+            return token
 
-        redirect_page = await self.post(
-            (
-                await self.get(  # type: ignore
-                    public_config["identityproviders"][0]["url"], follow_redirects=True
-                )
-            ).url,
-            data={
-                "j_username": username,
-                "j_password": password,
-                "_eventId_proceed": "",
-            },
+        idp_type, idp_info = IdentityProvider.get_responsible_idp(
+            public_config["identityproviders"]
         )
-
-        # TODO use python html.parser
-        formdata = re.search(
-            r'<form action="(?P<form_submit_url>[^"]*)" method="post">'
-            r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
-            r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
-            html.unescape(redirect_page.text),
-            flags=re.MULTILINE | re.DOTALL,
-        )
-
-        if not formdata:
-            raise MoodleException("Unable to parse login form")
-
-        await self.post(
-            formdata["form_submit_url"],
-            data=formdata.groupdict(),
-            follow_redirects=True,
-        )
+        await idp_type(
+            self.wwwroot,
+            username,
+            password,
+            idp_info,
+        ).async_login(self)
 
         passport = secrets.token_urlsafe()
 
@@ -250,4 +213,4 @@ class AsyncMoodleClient(AsyncClient):
         if signature != expected_signature:
             raise MoodleException("Invalid signature")
 
-        self.wstoken = wstoken
+        return wstoken
