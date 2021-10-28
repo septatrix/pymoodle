@@ -3,7 +3,7 @@ import hashlib
 import logging
 import secrets
 import sys
-from typing import Any, Iterable
+from typing import Any, Dict, Iterable
 
 from httpx import AsyncClient, Client
 
@@ -27,10 +27,19 @@ class AjaxRequest(TypedDict):
 
 
 class MoodleClient(Client):
-    def __init__(self, wwwroot: str, wstoken: str, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        wwwroot: str,
+        wstoken: str,
+        default_wssettings: Dict[str, Any] = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.wwwroot = wwwroot
         self.wstoken = wstoken
+        self.default_wssettings = (
+            default_wssettings if default_wssettings is not None else {}
+        )
 
     def ajax(self, requests: Iterable[AjaxRequest]) -> Any:
         indexed_requests = [
@@ -49,9 +58,10 @@ class MoodleClient(Client):
         response = self.post(
             f"{self.wwwroot}/webservice/rest/server.php",
             data={
+                "wstoken": self.wstoken,
+                **self.default_wssettings,
                 **flatten(data),
                 "moodlewsrestformat": "json",
-                "wstoken": self.wstoken,
                 "wsfunction": wsfunction,
             },
         )
@@ -122,10 +132,19 @@ MoodleSession = MoodleClient
 
 
 class AsyncMoodleClient(AsyncClient):
-    def __init__(self, wwwroot: str, wstoken: str, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        wwwroot: str,
+        wstoken: str,
+        default_wssettings: Dict[str, Any] = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.wwwroot = wwwroot
         self.wstoken = wstoken
+        self.default_wssettings = (
+            default_wssettings if default_wssettings is not None else {}
+        )
 
     async def ajax(self, requests: Iterable[AjaxRequest]) -> Any:
         indexed_requests = [
@@ -145,9 +164,10 @@ class AsyncMoodleClient(AsyncClient):
         response = await self.post(
             f"{self.wwwroot}/webservice/rest/server.php",
             data={
+                "wstoken": self.wstoken,
+                **self.default_wssettings,
                 **flatten(data),
                 "moodlewsrestformat": "json",
-                "wstoken": self.wstoken,
                 "wsfunction": wsfunction,
             },
         )
