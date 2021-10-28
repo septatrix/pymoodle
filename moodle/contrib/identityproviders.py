@@ -10,7 +10,7 @@ if sys.version_info >= (3, 8):
 else:
     from typing_extensions import TypedDict
 
-from httpx import AsyncClient, Client
+from httpx import URL, AsyncClient, Client
 
 from moodle.exceptions import MoodleException
 
@@ -77,8 +77,17 @@ class RWTHSingleSignOn(IdentityProvider):
         return idp["name"] == "RWTH Single Sign On"
 
     def sync_login(self, client: Client) -> None:
+        login_page_url = client.get(self.idp["url"], follow_redirects=True).url
+
+        if login_page_url is None:
+            raise MoodleException("URL unexpectedly not set on response")
+
+        if login_page_url.netloc == URL(self.wwwroot).netloc:
+            # We were redirected to Moodle so we are presumably logged in already
+            return
+
         redirect_page = client.post(
-            client.get(self.idp["url"], follow_redirects=True).url,  # type: ignore
+            login_page_url,
             data={
                 "j_username": self.username,
                 "j_password": self.password,
@@ -105,8 +114,17 @@ class RWTHSingleSignOn(IdentityProvider):
         )
 
     async def async_login(self, client: AsyncClient) -> None:
+        login_page_url = (await client.get(self.idp["url"], follow_redirects=True)).url
+
+        if login_page_url is None:
+            raise MoodleException("URL unexpectedly not set on response")
+
+        if login_page_url.netloc == URL(self.wwwroot).netloc:
+            # We were redirected to Moodle so we are presumably logged in already
+            return
+
         redirect_page = await client.post(
-            (await client.get(self.idp["url"], follow_redirects=True)).url,  # type: ignore
+            login_page_url,
             data={
                 "j_username": self.username,
                 "j_password": self.password,
