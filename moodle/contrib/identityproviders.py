@@ -86,12 +86,21 @@ class RWTHSingleSignOn(IdentityProvider):
             # We were redirected to Moodle so we are presumably logged in already
             return
 
+        csrf_match = re.search(
+            r'<input type="hidden" name="csrf_token" value="(?P<csrf_token>[^"]*)" />',
+            html.unescape(client.get(login_page_url).text),
+        )
+
+        if not csrf_match:
+            raise MoodleException("Unable to find csrf token")
+
         redirect_page = client.post(
             login_page_url,
             data={
                 "j_username": self.username,
                 "j_password": self.password,
                 "_eventId_proceed": "",
+                "csrf_token": csrf_match["csrf_token"],
             },
         )
 
@@ -101,7 +110,7 @@ class RWTHSingleSignOn(IdentityProvider):
             r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
             r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
             html.unescape(redirect_page.text),
-            flags=re.MULTILINE | re.DOTALL,
+            flags=re.DOTALL,
         )
 
         if not formdata:
@@ -123,12 +132,21 @@ class RWTHSingleSignOn(IdentityProvider):
             # We were redirected to Moodle so we are presumably logged in already
             return
 
+        csrf_match = re.search(
+            r'<input type="hidden" name="csrf_token" value="(?P<csrf_token>[^"]*)" />',
+            html.unescape((await client.get(login_page_url)).text),
+        )
+
+        if not csrf_match:
+            raise MoodleException("Unable to find csrf token")
+
         redirect_page = await client.post(
             login_page_url,
             data={
                 "j_username": self.username,
                 "j_password": self.password,
                 "_eventId_proceed": "",
+                "csrf_token": csrf_match["csrf_token"],
             },
         )
 
@@ -138,7 +156,7 @@ class RWTHSingleSignOn(IdentityProvider):
             r'.*<input type="hidden" name="RelayState" value="(?P<RelayState>[^"]*)"/>'
             r'.*<input type="hidden" name="SAMLResponse" value="(?P<SAMLResponse>[^"]*)"/>',
             html.unescape(redirect_page.text),
-            flags=re.MULTILINE | re.DOTALL,
+            flags=re.DOTALL,
         )
 
         if not formdata:
