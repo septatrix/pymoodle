@@ -15,6 +15,14 @@ from moodle.util import flatten
 logger = logging.getLogger(__name__)
 
 
+def _token_from_response(response: dict[str, Any]) -> str:
+    """Return the token from the response of login/token.php."""
+    token = response.get("token")
+    if not isinstance(token, str):
+        raise MoodleException(response.get("error", "Invalid wstoken returned"))
+    return token
+
+
 class AjaxRequest(TypedDict):
     methodname: str
     args: Any
@@ -81,14 +89,12 @@ class MoodleClient(Client):
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
-            tokens = self.get(
+            # Moodle only accepts credentials as POST parameters.
+            response = self.post(
                 f"{self.wwwroot}/login/token.php",
-                params={"username": username, "password": password, "service": service},
+                data={"username": username, "password": password, "service": service},
             )
-            token = tokens.json()["token"]
-            if not isinstance(token, str):
-                raise MoodleException("Invalid wstoken returned")
-            return token
+            return _token_from_response(response.json())
 
         idp_type, idp_info = IdentityProvider.get_responsible_idp(
             public_config["identityproviders"]
@@ -192,14 +198,12 @@ class AsyncMoodleClient(AsyncClient):
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
-            tokens = await self.get(
+            # Moodle only accepts credentials as POST parameters.
+            response = await self.post(
                 f"{self.wwwroot}/login/token.php",
-                params={"username": username, "password": password, "service": service},
+                data={"username": username, "password": password, "service": service},
             )
-            token = tokens.json()["token"]
-            if not isinstance(token, str):
-                raise MoodleException("Invalid wstoken returned")
-            return token
+            return _token_from_response(response.json())
 
         idp_type, idp_info = IdentityProvider.get_responsible_idp(
             public_config["identityproviders"]
