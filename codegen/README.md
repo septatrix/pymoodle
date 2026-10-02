@@ -10,7 +10,19 @@ Generating typed bindings is split into two steps:
 
 1. `export_webservices.php` extracts these descriptions from a Moodle checkout
    and serializes them to JSON.
-2. A Python script converts the JSON into typed Python code.
+2. `generate.py` converts the JSON into the typed Python code in `moodle/ws/`.
+
+To regenerate the bindings, e.g. for a new Moodle release, run:
+
+```sh
+git clone --depth 1 --branch MOODLE_405_STABLE https://github.com/moodle/moodle.git /tmp/moodle
+php codegen/export_webservices.php --output=/tmp/webservices.json /tmp/moodle
+python codegen/generate.py /tmp/webservices.json
+```
+
+The shipped bindings target the latest Moodle LTS release.
+To get bindings matching another Moodle version or including additional plugins,
+run the same steps against the respective checkout.
 
 ## Exporting the webservice definitions
 
@@ -85,3 +97,39 @@ Each description has the following fields:
 | `type`      | Only for values: the `PARAM_*` type, e.g. `"int"`, `"bool"`, `"raw"`, or `"alphanumext"`    |
 | `keys`      | Only for single structures: mapping of key names to descriptions                            |
 | `content`   | Only for multiple structures: description of the list items                                 |
+
+## Generating Python code
+
+`generate.py` writes the following modules to `moodle/ws/` (or the directory given with `--output-dir`)
+and formats them using ruff:
+
+- `types.py` contains a `TypedDict` for every structure in the parameters and return values.
+  They are named after the function and the path to the structure,
+  e.g. `CoreWebserviceGetSiteInfoReturns` or `CoreCourseGetCoursesParamsOptions`.
+  `{Function}Returns` always names the return type of a function,
+  as an alias if it is a list (whose items are named `{Function}ReturnsItem`) or a scalar.
+  The items of `external_warnings` and `external_files` are shared as `ExternalWarning` and `ExternalFile`.
+- `methods.py` contains the `WebserviceMethods` and `AsyncWebserviceMethods` mixins,
+  which have one method per function and are inherited by `MoodleClient` and `AsyncMoodleClient`.
+  All arguments are keyword-only.
+  Arguments which are Python keywords get a trailing underscore (e.g. `from_`).
+  Optional arguments default to `None`, in which case they are not sent and Moodle applies its default.
+  The types module is only imported when type checking,
+  as creating all TypedDicts would noticeably slow down importing pymoodle.
+- `__init__.py` contains the version of Moodle the bindings were generated from.
+
+The types reflect how Moodle validates parameters and return values:
+
+| Moodle                                     | Parameters                                   | Return values                                       |
+| ------------------------------------------ | -------------------------------------------- | --------------------------------------------------- |
+| `VALUE_REQUIRED`                           | required key                                 | required key                                        |
+| `VALUE_OPTIONAL`                           | `NotRequired`                                | `NotRequired`                                       |
+| `VALUE_DEFAULT`                            | `NotRequired`                                | required for values, `NotRequired` for structures   |
+| `NULL_ALLOWED`                             | ignored, `null` cannot be sent via REST      | `Optional`                                          |
+| `PARAM_INT`, `PARAM_FLOAT`, `PARAM_BOOL`   | `int`, `float`, `bool`                       | `int`, `float`, `bool`                              |
+| any other `PARAM_*`                        | `str`                                        | `str`                                               |
+
+Note that `external_value` allows `null` by default,
+so most scalar return values are typed as `Optional` even though Moodle rarely returns `null` for them.
+Furthermore, `PARAM_RAW` technically passes through non-string values unchanged,
+but values read from the database are always strings in Moodle.

@@ -55,9 +55,9 @@ ignore = [
 python_version = "3.11"
 strict = true
 warn_unreachable = true
-files = ["moodle", "tests"]
+files = ["moodle", "tests", "codegen"]
 
 [tool.pyright]
-include = ["moodle", "tests"]
+include = ["moodle", "tests", "codegen"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
