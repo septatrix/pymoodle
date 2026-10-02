@@ -11,6 +11,7 @@ from moodle.constants import LoginType
 from moodle.contrib.identityproviders import IdentityProvider
 from moodle.exceptions import MoodleException, WebserviceException
 from moodle.util import flatten
+from moodle.ws.methods import AsyncWebserviceMethods, WebserviceMethods
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class AjaxRequest(TypedDict):
     args: Any
 
 
-class MoodleClient(Client):
+class MoodleClient(WebserviceMethods, Client):
     def __init__(
         self,
         wwwroot: str,
@@ -131,7 +132,7 @@ class MoodleClient(Client):
 MoodleSession = MoodleClient
 
 
-class AsyncMoodleClient(AsyncClient):
+class AsyncMoodleClient(AsyncWebserviceMethods, AsyncClient):
     def __init__(
         self,
         wwwroot: str,
