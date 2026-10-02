@@ -9,44 +9,44 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v5
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: "3.x"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ".[test]"
-      - name: Check formatting with black and isort
-        run: |
-          black --check moodle
-          isort --check-only moodle
-      - name: Lint with flake8
-        run: flake8 moodle
+          pip install -e . --group dev
+      - name: Lint with ruff
+        run: ruff check --output-format=github
+      - name: Check formatting with ruff
+        run: ruff format --check
+      - name: Type check with mypy
+        run: mypy
+      - name: Type check with pyright
+        run: pyright
 
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.6", "3.10"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ".[test]"
-      - name: Analyze with mypy
-        run: mypy moodle
+          pip install -e .
+      - name: Run doctests
+        run: python -m doctest moodle/util.py
       - name: Run unittests
         run: python -m unittest discover --verbose tests
