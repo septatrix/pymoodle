@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.27", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "pymoodle"
-version = "0.3.2"
+dynamic = ["version"]
 description = "A python client for Moodle web services"
 readme = "README.md"
 license = "MIT"
@@ -27,11 +27,11 @@ Homepage = "https://github.com/septatrix/pymoodle"
 [dependency-groups]
 dev = ["mypy", "pyright", "ruff"]
 
-[tool.setuptools.packages.find]
-include = ["moodle*"]
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools.package-data]
-"*" = ["py.typed"]
+[tool.hatch.build.targets.wheel]
+packages = ["moodle"]
 
 [tool.ruff]
 target-version = "py311"
