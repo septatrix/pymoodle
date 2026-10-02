@@ -12,6 +12,11 @@ def flatten(data: Mapping[Any, object], prefix: str = "") -> dict[str, Any]:
     {'grades[0][userid]': 1, 'grades[0][grade]': 1}
     >>> flatten({})
     {}
+
+    Booleans are converted to integers, as Moodle does not accept "true" and "false":
+
+    >>> flatten({"returnusercount": False})
+    {'returnusercount': 0}
     """
 
     formatted_data: dict[str, Any] = {}
@@ -25,6 +30,8 @@ def flatten(data: Mapping[Any, object], prefix: str = "") -> dict[str, Any]:
         elif isinstance(value, list):
             items = cast("list[object]", value)
             formatted_data.update(flatten(dict(enumerate(items)), prefix=new_key))
+        elif isinstance(value, bool):
+            formatted_data[new_key] = int(value)
         else:
             formatted_data[new_key] = value
 
