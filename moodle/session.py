@@ -2,8 +2,8 @@ import base64
 import hashlib
 import logging
 import secrets
-import sys
-from typing import Any, Dict, Iterable
+from collections.abc import Iterable
+from typing import Any, TypedDict
 
 from httpx import AsyncClient, Client
 
@@ -11,12 +11,6 @@ from moodle.constants import LoginType
 from moodle.contrib.identityproviders import IdentityProvider
 from moodle.exceptions import MoodleException, WebserviceException
 from moodle.util import flatten
-
-if sys.version_info >= (3, 8):
-    from typing import TypedDict
-else:
-    from typing_extensions import TypedDict
-
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +25,7 @@ class MoodleClient(Client):
         self,
         wwwroot: str,
         wstoken: str,
-        default_wssettings: Dict[str, Any] = None,
+        default_wssettings: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -51,7 +45,7 @@ class MoodleClient(Client):
             f"{self.wwwroot}/lib/ajax/service.php", json=indexed_requests
         ).json()
 
-    def webservice(self, wsfunction: str, data: dict = None) -> Any:
+    def webservice(self, wsfunction: str, data: dict[str, Any] | None = None) -> Any:
         if data is None:
             data = {}
 
@@ -136,7 +130,7 @@ class AsyncMoodleClient(AsyncClient):
         self,
         wwwroot: str,
         wstoken: str,
-        default_wssettings: Dict[str, Any] = None,
+        default_wssettings: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -157,7 +151,9 @@ class AsyncMoodleClient(AsyncClient):
         )
         return response.json()
 
-    async def webservice(self, wsfunction: str, data: dict = None) -> Any:
+    async def webservice(
+        self, wsfunction: str, data: dict[str, Any] | None = None
+    ) -> Any:
         if data is None:
             data = {}
 
