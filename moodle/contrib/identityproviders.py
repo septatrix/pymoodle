@@ -1,14 +1,8 @@
 import html
 import inspect
 import re
-import sys
 from abc import ABC, abstractmethod
-from typing import ClassVar, List, Tuple, Type
-
-if sys.version_info >= (3, 8):
-    from typing import TypedDict
-else:
-    from typing_extensions import TypedDict
+from typing import ClassVar, TypedDict
 
 from httpx import URL, AsyncClient, Client
 
@@ -22,7 +16,7 @@ class IDPInfo(TypedDict):
 
 
 class IdentityProvider(ABC):
-    providers: ClassVar[List[Type["IdentityProvider"]]] = []
+    providers: ClassVar[list[type["IdentityProvider"]]] = []
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -31,8 +25,8 @@ class IdentityProvider(ABC):
 
     @classmethod
     def get_responsible_idp(
-        cls, idp_infos: List[IDPInfo]
-    ) -> Tuple[Type["IdentityProvider"], IDPInfo]:
+        cls, idp_infos: list[IDPInfo]
+    ) -> tuple[type["IdentityProvider"], IDPInfo]:
         for idp_info in idp_infos:
             for idp_type in IdentityProvider.providers:
                 if idp_type.is_responsible(idp_info):
@@ -54,8 +48,7 @@ class IdentityProvider(ABC):
 
     @staticmethod
     @abstractmethod
-    def is_responsible(idp: IDPInfo) -> bool:
-        ...
+    def is_responsible(idp: IDPInfo) -> bool: ...
 
     def login(self, client: Client) -> None:
         return None
@@ -78,9 +71,6 @@ class RWTHSingleSignOn(IdentityProvider):
 
     def sync_login(self, client: Client) -> None:
         login_page_url = client.get(self.idp["url"], follow_redirects=True).url
-
-        if login_page_url is None:
-            raise MoodleException("URL unexpectedly not set on response")
 
         if login_page_url.netloc == URL(self.wwwroot).netloc:
             # We were redirected to Moodle so we are presumably logged in already
@@ -124,9 +114,6 @@ class RWTHSingleSignOn(IdentityProvider):
 
     async def async_login(self, client: AsyncClient) -> None:
         login_page_url = (await client.get(self.idp["url"], follow_redirects=True)).url
-
-        if login_page_url is None:
-            raise MoodleException("URL unexpectedly not set on response")
 
         if login_page_url.netloc == URL(self.wwwroot).netloc:
             # We were redirected to Moodle so we are presumably logged in already

@@ -2,8 +2,8 @@ import base64
 import hashlib
 import logging
 import secrets
-import sys
-from typing import Any, Dict, Iterable
+from collections.abc import Iterable
+from typing import Any, TypedDict
 
 from httpx import AsyncClient, Client
 
@@ -11,14 +11,17 @@ from moodle.constants import LoginType
 from moodle.contrib.identityproviders import IdentityProvider
 from moodle.exceptions import MoodleException, WebserviceException
 from moodle.util import flatten
-
-if sys.version_info >= (3, 8):
-    from typing import TypedDict
-else:
-    from typing_extensions import TypedDict
-
+from moodle.ws.methods import AsyncWebserviceMethods, WebserviceMethods
 
 logger = logging.getLogger(__name__)
+
+
+def _token_from_response(response: dict[str, Any]) -> str:
+    """Return the token from the response of login/token.php."""
+    token = response.get("token")
+    if not isinstance(token, str):
+        raise MoodleException(response.get("error", "Invalid wstoken returned"))
+    return token
 
 
 class AjaxRequest(TypedDict):
@@ -26,12 +29,12 @@ class AjaxRequest(TypedDict):
     args: Any
 
 
-class MoodleClient(Client):
+class MoodleClient(WebserviceMethods, Client):
     def __init__(
         self,
         wwwroot: str,
         wstoken: str,
-        default_wssettings: Dict[str, Any] = None,
+        default_wssettings: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -51,7 +54,7 @@ class MoodleClient(Client):
             f"{self.wwwroot}/lib/ajax/service.php", json=indexed_requests
         ).json()
 
-    def webservice(self, wsfunction: str, data: dict = None) -> Any:
+    def webservice(self, wsfunction: str, data: dict[str, Any] | None = None) -> Any:
         if data is None:
             data = {}
 
@@ -87,14 +90,12 @@ class MoodleClient(Client):
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
-            tokens = self.get(
+            # Moodle only accepts credentials as POST parameters.
+            response = self.post(
                 f"{self.wwwroot}/login/token.php",
-                params={"username": username, "password": password, "service": service},
+                data={"username": username, "password": password, "service": service},
             )
-            token = tokens.json()["token"]
-            if not isinstance(token, str):
-                raise MoodleException("Invalid wstoken returned")
-            return token
+            return _token_from_response(response.json())
 
         idp_type, idp_info = IdentityProvider.get_responsible_idp(
             public_config["identityproviders"]
@@ -131,12 +132,12 @@ class MoodleClient(Client):
 MoodleSession = MoodleClient
 
 
-class AsyncMoodleClient(AsyncClient):
+class AsyncMoodleClient(AsyncWebserviceMethods, AsyncClient):
     def __init__(
         self,
         wwwroot: str,
         wstoken: str,
-        default_wssettings: Dict[str, Any] = None,
+        default_wssettings: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -157,7 +158,9 @@ class AsyncMoodleClient(AsyncClient):
         )
         return response.json()
 
-    async def webservice(self, wsfunction: str, data: dict = None) -> Any:
+    async def webservice(
+        self, wsfunction: str, data: dict[str, Any] | None = None
+    ) -> Any:
         if data is None:
             data = {}
 
@@ -196,14 +199,12 @@ class AsyncMoodleClient(AsyncClient):
         )[0]["data"]
 
         if public_config["typeoflogin"] == LoginType.LOGIN_VIA_APP:
-            tokens = await self.get(
+            # Moodle only accepts credentials as POST parameters.
+            response = await self.post(
                 f"{self.wwwroot}/login/token.php",
-                params={"username": username, "password": password, "service": service},
+                data={"username": username, "password": password, "service": service},
             )
-            token = tokens.json()["token"]
-            if not isinstance(token, str):
-                raise MoodleException("Invalid wstoken returned")
-            return token
+            return _token_from_response(response.json())
 
         idp_type, idp_info = IdentityProvider.get_responsible_idp(
             public_config["identityproviders"]
